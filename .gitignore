@@ -1,0 +1,5 @@
+node_modules
+dist
+public/mediapipe/wasm
+tools/*.vrm
+.vercel

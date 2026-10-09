@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#14121f" />
+    <title>VTuber · Gally</title>
+    <meta name="description" content="A browser VTuber. An anime avatar follows your face using your webcam. Everything runs locally in your browser." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+  </head>
+  <body class="bg-dusk">
+    <canvas id="scene"></canvas>
+
+    <header class="topbar ui">
+      <div class="brand">
+        <span class="dot"></span>
+        <div>
+          <h1>Gally</h1>
+          <p id="modelName">Alita inspired fan homage</p>
+        </div>
+      </div>
+      <div id="status" class="status">Loading avatar…</div>
+    </header>
+
+    <div id="hero" class="hero ui">
+      <h2>Your face, her moves.</h2>
+      <p>Turn on your camera and the avatar will copy your head, eyes, blinks and mouth in real time.</p>
+      <button id="startBtn" class="primary" disabled>Start camera</button>
+      <p class="privacy">🔒 Everything runs in your browser. Your camera never leaves this device.</p>
+      <p id="error" class="error" hidden></p>
+    </div>
+
+    <div class="preview ui" id="previewWrap" hidden>
+      <video id="video" playsinline muted autoplay></video>
+      <span class="badge" id="trackBadge">No face</span>
+    </div>
+
+    <nav class="toolbar ui">
+      <button id="previewBtn" class="chip" disabled title="Show or hide the camera preview">📷 Preview</button>
+      <button id="bgBtn" class="chip" title="Change the background">🎨 Background</button>
+      <button id="greenBtn" class="chip" title="Solid green for OBS chroma key">🟩 Green screen</button>
+      <label class="chip file" title="Load a .vrm made in VRoid Studio">
+        📂 Load your own .vrm
+        <input id="fileInput" type="file" accept=".vrm" hidden />
+      </label>
+      <button id="resetBtn" class="chip" title="Back to Gally" hidden>↺ Gally</button>
+      <button id="hideBtn" class="chip" title="Hide the interface (press H to bring it back)">🙈 Hide UI</button>
+    </nav>
+
+    <div id="drop" class="drop" hidden><div>Drop your .vrm here</div></div>
+    <div id="toast" class="toast" hidden></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

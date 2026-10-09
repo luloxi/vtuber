@@ -1,0 +1,62 @@
+:root {
+  --fg: #f4f1ff;
+  --muted: #b9b3d6;
+  --glass: rgba(20, 18, 34, 0.55);
+  --line: rgba(255, 255, 255, 0.12);
+  --accent: #46e0ff;
+  --accent2: #ff5d8f;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, sans-serif;
+  color: var(--fg);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { transition: background 0.4s ease; -webkit-tap-highlight-color: transparent; }
+body.bg-dusk { background: radial-gradient(120% 90% at 50% 10%, #3b2f6b 0%, #1a1631 55%, #0d0b18 100%); }
+body.bg-sunset { background: linear-gradient(180deg, #ffb38a 0%, #ff6f91 45%, #6a3d9a 100%); }
+body.bg-sky { background: linear-gradient(180deg, #9be7ff 0%, #d7f3ff 55%, #fff6e9 100%); }
+body.bg-ink { background: #101014; }
+body.bg-green { background: #00ff00; }
+
+#scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; }
+
+.ui { position: fixed; z-index: 2; transition: opacity 0.25s ease; }
+body.ui-hidden .ui { opacity: 0; pointer-events: none; }
+body.ui-hidden .preview.keep { opacity: 0; }
+
+.topbar { top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: max(14px, env(safe-area-inset-top)) 18px 0; pointer-events: none; }
+.brand { display: flex; gap: 10px; align-items: center; }
+.brand h1 { margin: 0; font-size: 18px; letter-spacing: 0.04em; }
+.brand p { margin: 0; font-size: 12px; color: var(--muted); }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+.status { font-size: 12px; color: var(--muted); background: var(--glass); border: 1px solid var(--line); padding: 6px 10px; border-radius: 999px; backdrop-filter: blur(8px); }
+
+.hero { left: 50%; bottom: 96px; transform: translateX(-50%); width: min(420px, calc(100vw - 28px)); text-align: center; padding: 18px 20px 14px; background: var(--glass); border: 1px solid var(--line); border-radius: 20px; backdrop-filter: blur(14px); }
+.hero h2 { margin: 0 0 6px; font-size: 20px; }
+.hero p { margin: 0 0 12px; font-size: 14px; color: var(--muted); line-height: 1.4; }
+.hero .privacy { font-size: 12px; margin: 10px 0 0; }
+.error { color: #ffd2dc !important; background: rgba(255, 70, 110, 0.18); border: 1px solid rgba(255, 70, 110, 0.4); border-radius: 12px; padding: 8px 10px; margin-top: 10px !important; }
+
+button, .chip { font: inherit; color: var(--fg); cursor: pointer; }
+.primary { border: 0; border-radius: 999px; padding: 12px 26px; font-size: 16px; font-weight: 600; background: linear-gradient(90deg, var(--accent), #8f7bff 60%, var(--accent2)); color: #120f22; box-shadow: 0 8px 24px rgba(70, 224, 255, 0.25); }
+.primary:disabled { opacity: 0.5; cursor: progress; }
+
+.toolbar { left: 50%; transform: translateX(-50%); bottom: max(16px, env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: min(760px, calc(100vw - 20px)); }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 8px 12px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); user-select: none; }
+.chip:hover { border-color: rgba(255, 255, 255, 0.3); }
+.chip.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.chip:disabled { opacity: 0.45; cursor: default; }
+
+.preview { right: 16px; top: 64px; width: min(200px, 34vw); border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #000; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }
+.preview video { display: block; width: 100%; transform: scaleX(-1); }
+.badge { position: absolute; left: 8px; bottom: 8px; font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); }
+.badge.ok { color: #7dffb0; }
+
+.drop { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; background: rgba(10, 8, 20, 0.6); border: 3px dashed var(--accent); font-size: 22px; }
+.toast { position: fixed; z-index: 6; left: 50%; top: 70px; transform: translateX(-50%); background: var(--glass); border: 1px solid var(--line); padding: 8px 14px; border-radius: 12px; font-size: 13px; backdrop-filter: blur(10px); }
+
+@media (max-width: 600px) {
+  .hero { bottom: 120px; }
+  .chip { font-size: 12px; padding: 7px 10px; }
+  .preview { top: 60px; right: 10px; }
+}
+[hidden] { display: none !important; }
