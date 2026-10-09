@@ -2,7 +2,7 @@
 
 A browser VTuber. An anime 3D avatar follows your face through the webcam and copies your head, eyes, blinks and mouth in real time.
 
-**Live:** https://vtuber-luloxi.vercel.app (see the repo description for the current URL)
+**Live:** https://lulox-vtuber.vercel.app
 
 ## Privacy
 
