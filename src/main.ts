@@ -2,10 +2,10 @@ import './style.css';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRM, VRMLoaderPlugin, VRMUtils, VRMHumanBoneName } from '@pixiv/three-vrm';
-import { FaceLandmarker, PoseLandmarker, FilesetResolver, type FaceLandmarkerResult, type Landmark, type NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { FaceLandmarker, PoseLandmarker, HandLandmarker, FilesetResolver, type FaceLandmarkerResult, type Landmark, type NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { CHARACTERS, HAIRSTYLES, HAIR_COLORS, OUTFITS, BASE_URLS, charById, type Config } from './characters';
 import { AvatarDresser } from './avatar';
-import { ArmRig } from './arms';
+import { ArmSystem, type HandObs, type FaceBox } from './arms';
 
 // MediaPipe's wasm prints harmless INFO lines through console.error. Keep the console clean.
 const origError = console.error.bind(console);
@@ -76,7 +76,9 @@ let isVRM0 = false;
 let restPose: Record<string, THREE.Euler> = {};
 
 let dresser: AvatarDresser | null = null;
-let arms: ArmRig | null = null;
+let arms: ArmSystem | null = null;
+let debugColliders = false;
+let armMs = 0;
 let loadedUrl = '';
 let isCustomModel = false;
 
@@ -94,6 +96,7 @@ async function loadVRM(url: string, label: string, custom = false) {
 
   if (vrm) {
     dresser?.dispose();
+    arms?.dispose();
     scene.remove(vrm.scene);
     VRMUtils.deepDispose(vrm.scene);
   }
@@ -115,7 +118,8 @@ async function loadVRM(url: string, label: string, custom = false) {
   for (const [name, e] of Object.entries(restPose))
     restLocal[name] = new THREE.Quaternion().setFromEuler(new THREE.Euler(isVRM0 ? -e.x : e.x, e.y, isVRM0 ? -e.z : e.z, 'YXZ'));
   // Measure the rest pose before anything moves.
-  arms = new ArmRig(next, restLocal);
+  arms = new ArmSystem(next, restLocal, isVRM0);
+  if (debugColliders) arms.setDebug(true, scene);
   dresser = custom ? null : new AvatarDresser(next);
   loadedUrl = url;
   isCustomModel = custom;
@@ -158,9 +162,12 @@ const state = {
 const target = { ...state };
 let landmarker: FaceLandmarker | null = null;
 let poseLandmarker: PoseLandmarker | null = null;
+let handLandmarker: HandLandmarker | null = null;
+let handRuns = 0;
 let poseRuns = 0;
 // Test hook: synthetic pose landmarks for automated checks.
-let fakePose: { world: Landmark[]; image: NormalizedLandmark[] } | null = null;
+interface FakeInputs { pose?: { world: Landmark[]; image: NormalizedLandmark[] } | null; hands?: HandObs[]; face?: FaceBox | null }
+let fakeInputs: FakeInputs | null = null;
 let poseFrame = 0;
 let cameraOn = false;
 let lastVideoTime = -1;
@@ -189,6 +196,11 @@ function applyResult(result: FaceLandmarkerResult) {
   const mat = result.facialTransformationMatrixes?.[0];
   if (!lm || !mat) return false;
   lastFaceAt = performance.now();
+  {
+    let minX = 1, minY = 1, maxX = 0, maxY = 0;
+    for (const p of lm) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
+    arms?.setFace({ minX, minY, maxX, maxY }, lastFaceAt / 1000);
+  }
 
   // Head rotation. MediaPipe gives a camera space matrix (x right, y up, z toward camera).
   headMat.fromArray(mat.data);
@@ -277,6 +289,21 @@ async function ensureLandmarker() {
     try { poseLandmarker = await PoseLandmarker.createFromOptions(fileset, poseOpts('CPU')); }
     catch (err) { console.warn('Arm tracking unavailable', err); }
   }
+  setStatus('Loading hand tracker…');
+  const handOpts = (delegate: 'GPU' | 'CPU') => ({
+    baseOptions: { modelAssetPath: '/mediapipe/hand_landmarker.task', delegate },
+    runningMode: 'VIDEO' as const,
+    numHands: 2,
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+  try {
+    handLandmarker = await HandLandmarker.createFromOptions(fileset, handOpts('GPU'));
+  } catch {
+    try { handLandmarker = await HandLandmarker.createFromOptions(fileset, handOpts('CPU')); }
+    catch (err) { console.warn('Hand tracking unavailable', err); }
+  }
   return landmarker;
 }
 
@@ -325,10 +352,22 @@ function track(now: number) {
   lastVideoTime = video.currentTime;
   const result = landmarker.detectForVideo(video, now);
   const found = applyResult(result);
-  if (poseLandmarker && arms && poseFrame++ % 2 === 0) {
-    const pose = poseLandmarker.detectForVideo(video, now + 0.5);
-    poseRuns++;
-    arms.setPose(pose.worldLandmarks?.[0], pose.landmarks?.[0], now);
+  if (arms) {
+    arms.aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 4 / 3;
+    // Pose and hands alternate frames to keep the cost down.
+    const even = poseFrame++ % 2 === 0;
+    if (even && poseLandmarker) {
+      const pose = poseLandmarker.detectForVideo(video, now + 0.5);
+      poseRuns++;
+      arms.setPose(pose.worldLandmarks?.[0], pose.landmarks?.[0], now / 1000);
+    } else if (!even && handLandmarker) {
+      const r = handLandmarker.detectForVideo(video, now + 0.5);
+      handRuns++;
+      arms.setHands(r.landmarks.map((image, i) => ({
+        image, world: r.worldLandmarks[i] ?? image,
+        label: r.handedness[i]?.[0]?.categoryName ?? '', score: r.handedness[i]?.[0]?.score ?? 0,
+      })), now / 1000);
+    }
   }
   trackBadge.textContent = found ? 'Face found' : 'No face';
   trackBadge.classList.toggle('ok', found);
@@ -380,8 +419,12 @@ function animate() {
     setBone('chest', breathe + s.pitch * 0.08, s.yaw * 0.12, s.roll * 0.1);
     setBone('spine', -breathe * 0.5, s.yaw * 0.06, s.x * 0.06 + s.roll * 0.05);
     setBone('hips', 0, 0, 0);
-    if (fakePose) arms?.setPose(fakePose.world, fakePose.image, now);
-    arms?.update(dt, now);
+    if (fakeInputs && arms) {
+      if (fakeInputs.pose !== undefined) arms.setPose(fakeInputs.pose?.world, fakeInputs.pose?.image, now / 1000);
+      if (fakeInputs.hands) arms.setHands(fakeInputs.hands, now / 1000);
+      if (fakeInputs.face) arms.setFace(fakeInputs.face, now / 1000);
+    }
+    if (arms) { const t0 = performance.now(); arms.update(dt, now); armMs += (performance.now() - t0 - armMs) * 0.05; }
     dresser?.update(t);
 
     const em = vrm.expressionManager;
@@ -432,6 +475,11 @@ function toggleUI() {
 $('hideBtn').addEventListener('click', toggleUI);
 window.addEventListener('keydown', (e) => {
   if (e.key === 'h' || e.key === 'H') toggleUI();
+  if (e.key === 'd' || e.key === 'D') {
+    debugColliders = !debugColliders;
+    arms?.setDebug(debugColliders, scene);
+    showToast(debugColliders ? 'Collider debug view on (press D to hide)' : 'Collider debug view off');
+  }
 });
 canvas.addEventListener('dblclick', () => document.body.classList.contains('ui-hidden') && toggleUI());
 
@@ -568,7 +616,11 @@ function choose() {
     return applyConfig(config);
   },
   characters: CHARACTERS.map((c) => c.id),
-  setFakePose: (p: typeof fakePose) => { fakePose = p; },
+  setFakeInputs: (p: FakeInputs | null) => { fakeInputs = p; },
+  armDebug: () => arms?.debugInfo(),
+  get armMs() { return armMs; },
+  get handRuns() { return handRuns; },
+  setDebugColliders: (on: boolean) => { debugColliders = on; arms?.setDebug(on, scene); },
   state,
 };
 

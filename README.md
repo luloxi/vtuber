@@ -11,7 +11,13 @@ Everything runs on the client. The webcam stream is processed by MediaPipe insid
 ## Features
 
 - Head and neck rotation, a little body follow, selfie style mirroring
-- Arm tracking with MediaPipe Pose Landmarker (lite, every other frame): shoulders, elbows and wrists drive the upper arms, forearms and hands, with joint limits and smoothing. Arms ease back to a relaxed pose when they leave the frame.
+- Arm and hand tracking with MediaPipe Pose Landmarker (lite) and Hand Landmarker (2 hands). The two models alternate frames. An arm is only shown when its hand is actually detected (or, without the hand model, when the pose is confident). Pose and hand wrists are fused, and the hand model also drives wrist rotation and rough per-finger curls. All landmarks go through a One Euro filter with frame-to-frame jump rejection.
+- Hand states with hysteresis:
+  - **Not visible, behind you or low confidence:** the arm eases back to rest.
+  - **Hands together:** they clasp in front of the body and meet without overlapping.
+  - **Hand over your face:** it is raised to the face, but in front of it, never inside the head.
+  - **Otherwise:** it follows your arm.
+- Body collision: the arms never pass through the character. Capsules and spheres for the torso, neck, head and the other arm are sized per avatar from its own bones and mesh. Every frame, the two-bone IK result is projected out of them, and anything inside the torso resolves to the front. If a pose cannot be cleared, the arm stops at the closest collision-free point on the way back to rest. Press **D** to show the colliders.
 - Mouth shapes (aa, ih, ou, ee, oh) from MediaPipe blendshapes (jawOpen, mouthFunnel, mouthPucker, smile, stretch)
 - Blinks and winks, eye gaze (iris position), idle breathing, hair physics (VRM spring bones)
 - Smoothing so it does not jitter, idle animation when no face is found
@@ -68,4 +74,4 @@ python3 tools/make_gally.py   # optional, regenerates Gally (needs Pillow + nump
 python3 tools/build_assets.py # optional, regenerates the woman/man bases and hair meshes
 ```
 
-Stack: Vite, TypeScript, three.js, @pixiv/three-vrm, @mediapipe/tasks-vision (Face Landmarker float16 and Pose Landmarker lite models from Google, Apache 2.0).
+Stack: Vite, TypeScript, three.js, @pixiv/three-vrm, @mediapipe/tasks-vision (Face Landmarker float16, Pose Landmarker lite and Hand Landmarker models from Google, Apache 2.0).
