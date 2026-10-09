@@ -1,22 +1,50 @@
-# VTuber · Gally
+# VTuber · Gally and friends
 
-A browser VTuber. An anime 3D avatar follows your face through the webcam and copies your head, eyes, blinks and mouth in real time.
+A browser VTuber. An anime 3D avatar follows you through the webcam and copies your head, eyes, blinks, mouth and arms in real time.
 
 **Live:** https://lulox-vtuber.vercel.app
 
 ## Privacy
 
-Everything runs on the client. The webcam stream is processed by MediaPipe inside your browser (WebAssembly + WebGL) and is never uploaded. There are no analytics and no third party requests: the MediaPipe runtime, the face model and the avatar are all served from this site.
+Everything runs on the client. The webcam stream is processed by MediaPipe inside your browser (WebAssembly + WebGL) and is never uploaded. There are no analytics and no third party requests: the MediaPipe runtime, the face and pose models, the avatars and the hair meshes are all served from this site. Your customizer choice is stored in localStorage only.
 
 ## Features
 
 - Head and neck rotation, a little body follow, selfie style mirroring
+- Arm tracking with MediaPipe Pose Landmarker (lite, every other frame): shoulders, elbows and wrists drive the upper arms, forearms and hands, with joint limits and smoothing. Arms ease back to a relaxed pose when they leave the frame.
 - Mouth shapes (aa, ih, ou, ee, oh) from MediaPipe blendshapes (jawOpen, mouthFunnel, mouthPucker, smile, stretch)
 - Blinks and winks, eye gaze (iris position), idle breathing, hair physics (VRM spring bones)
 - Smoothing so it does not jitter, idle animation when no face is found
 - Toggleable camera preview, background presets and a solid green screen for OBS chroma key
 - **Load your own .vrm** (button or drag and drop). Models from VRoid Studio (VRM 0.x or 1.0) work. The file stays on your device.
 - Press **H** (or use Hide UI) to hide the interface for streaming. Double click to bring it back.
+
+## Customizer
+
+Pick a character, one of 5 hairstyles, 5 hair colours and 5 outfits (saved on the device):
+
+- Characters: Gally (Alita-inspired), Woman, Man, Green alien, Blue alien, Cat, Furry (wolf), Fox (Zootopia-inspired), Bunny (Zootopia-inspired)
+- Hairstyles: Bob, Long straight, Short messy, Swept spiky, Fluffy long. Each one is the real hair mesh of a different CC0 VRoid sample, re-bound at runtime to whichever body is loaded (the hair is static, it has no physics).
+- Hair colours: Black, Brown, Blonde, Ginger, Silver (hair textures are greyscale and tinted live)
+- Outfits: Original, Cyber suit, Green shirt & tie, Officer blue, Red casual. These recolour the base model's own clothes and add a few procedural accessories (tie, badge, glow trims). The cut of the clothes comes from the base model.
+- Aliens and animals are the human bases with a skin or fur tint plus procedural three.js parts (ears, tails, muzzles, antennae, whiskers).
+
+The fox and the bunny are original characters that only borrow a general vibe (orange fox with a green shirt and tie, grey bunny in a blue uniform). They use no Disney assets or designs.
+
+## Model sources and licenses
+
+All models are VRoid sample models by pixiv Inc., taken from https://github.com/madjin/vrm-samples (`vroid/beta`). Each file's VRM metadata says `licenseName: CC0`, and VRoid lists these samples as CC0: https://vroid.pixiv.help/hc/en-us/articles/4402614652569
+
+| File in this repo | Source model | License |
+| --- | --- | --- |
+| `public/models/gally.vrm` | Darkness Shibu (β Ver AvatarSample_1, darkness version) | CC0 ([page](https://vroid.pixiv.help/hc/en-us/articles/360012381793)) |
+| `public/models/woman.vrm`, `public/hair/bob.glb` | Sendagaya Shibu (β Ver AvatarSample_1) | CC0 ([page](https://vroid.pixiv.help/hc/en-us/articles/360012381793)) |
+| `public/models/man.vrm`, `public/hair/short.glb` | HairSample_Male | CC0 |
+| `public/hair/long.glb` | Sendagaya Shino (AvatarSample_1's sister) | CC0 (VRM metadata) |
+| `public/hair/swept.glb` | Sakurada Fumiriya (AvatarSample_1's cousin) | CC0 (VRM metadata) |
+| `public/hair/fluffy.glb` | Victoria Rubin (β Ver AvatarSample_4) | CC0 ([page](https://vroid.pixiv.help/hc/en-us/articles/360014900233)) |
+
+`tools/build_assets.py` rebuilds the woman, man and hair files from the originals. The derived files are offered under CC0 as well.
 
 ## Avatar: Gally (Alita fan homage)
 
@@ -36,7 +64,8 @@ It is derived from **"Darkness Shibu" (β Ver AvatarSample_1 by pixiv Inc. / VRo
 npm install          # also copies the MediaPipe wasm into public/mediapipe/wasm
 npm run dev          # http://localhost:5173 (camera works on localhost)
 npm run build        # static site in dist/
-python3 tools/make_gally.py   # optional, regenerates the avatar (needs Pillow + numpy)
+python3 tools/make_gally.py   # optional, regenerates Gally (needs Pillow + numpy)
+python3 tools/build_assets.py # optional, regenerates the woman/man bases and hair meshes
 ```
 
-Stack: Vite, TypeScript, three.js, @pixiv/three-vrm, @mediapipe/tasks-vision (Face Landmarker, float16 model from Google, Apache 2.0).
+Stack: Vite, TypeScript, three.js, @pixiv/three-vrm, @mediapipe/tasks-vision (Face Landmarker float16 and Pose Landmarker lite models from Google, Apache 2.0).

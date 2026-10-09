@@ -2,7 +2,10 @@ import './style.css';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRM, VRMLoaderPlugin, VRMUtils, VRMHumanBoneName } from '@pixiv/three-vrm';
-import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from '@mediapipe/tasks-vision';
+import { FaceLandmarker, PoseLandmarker, FilesetResolver, type FaceLandmarkerResult, type Landmark, type NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { CHARACTERS, HAIRSTYLES, HAIR_COLORS, OUTFITS, BASE_URLS, charById, type Config } from './characters';
+import { AvatarDresser } from './avatar';
+import { ArmRig } from './arms';
 
 // MediaPipe's wasm prints harmless INFO lines through console.error. Keep the console clean.
 const origError = console.error.bind(console);
@@ -11,8 +14,7 @@ console.error = (...args: unknown[]) => {
   origError(...args);
 };
 
-const DEFAULT_MODEL = '/models/gally.vrm';
-const DEFAULT_LABEL = 'Alita inspired fan homage';
+const STORAGE_KEY = 'vtuber.custom.v1';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('scene');
@@ -73,7 +75,12 @@ let vrm: VRM | null = null;
 let isVRM0 = false;
 let restPose: Record<string, THREE.Euler> = {};
 
-async function loadVRM(url: string, label: string) {
+let dresser: AvatarDresser | null = null;
+let arms: ArmRig | null = null;
+let loadedUrl = '';
+let isCustomModel = false;
+
+async function loadVRM(url: string, label: string, custom = false) {
   setStatus('Loading avatar…');
   const gltf = await loader.loadAsync(url, (e) => {
     if (e.total) setStatus(`Loading avatar… ${Math.round((e.loaded / e.total) * 100)}%`);
@@ -86,6 +93,7 @@ async function loadVRM(url: string, label: string) {
   next.scene.traverse((o) => (o.frustumCulled = false));
 
   if (vrm) {
+    dresser?.dispose();
     scene.remove(vrm.scene);
     VRMUtils.deepDispose(vrm.scene);
   }
@@ -103,6 +111,14 @@ async function loadVRM(url: string, label: string) {
     leftHand: new THREE.Euler(0, 0, -0.1),
     rightHand: new THREE.Euler(0, 0, 0.1),
   };
+  const restLocal: Record<string, THREE.Quaternion> = {};
+  for (const [name, e] of Object.entries(restPose))
+    restLocal[name] = new THREE.Quaternion().setFromEuler(new THREE.Euler(isVRM0 ? -e.x : e.x, e.y, isVRM0 ? -e.z : e.z, 'YXZ'));
+  // Measure the rest pose before anything moves.
+  arms = new ArmRig(next, restLocal);
+  dresser = custom ? null : new AvatarDresser(next);
+  loadedUrl = url;
+  isCustomModel = custom;
   frameCamera();
   modelName.textContent = label;
   setStatus(cameraOn ? 'Tracking' : 'Ready');
@@ -141,6 +157,11 @@ const state = {
 };
 const target = { ...state };
 let landmarker: FaceLandmarker | null = null;
+let poseLandmarker: PoseLandmarker | null = null;
+let poseRuns = 0;
+// Test hook: synthetic pose landmarks for automated checks.
+let fakePose: { world: Landmark[]; image: NormalizedLandmark[] } | null = null;
+let poseFrame = 0;
 let cameraOn = false;
 let lastVideoTime = -1;
 let lastFaceAt = 0;
@@ -241,6 +262,21 @@ async function ensureLandmarker() {
   } catch {
     landmarker = await FaceLandmarker.createFromOptions(fileset, opts('CPU'));
   }
+  // Arm tracking: the lite pose model, run at a lower rate than the face.
+  setStatus('Loading arm tracker…');
+  const poseOpts = (delegate: 'GPU' | 'CPU') => ({
+    baseOptions: { modelAssetPath: '/mediapipe/pose_landmarker_lite.task', delegate },
+    runningMode: 'VIDEO' as const,
+    numPoses: 1,
+    minPoseDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+  try {
+    poseLandmarker = await PoseLandmarker.createFromOptions(fileset, poseOpts('GPU'));
+  } catch {
+    try { poseLandmarker = await PoseLandmarker.createFromOptions(fileset, poseOpts('CPU')); }
+    catch (err) { console.warn('Arm tracking unavailable', err); }
+  }
   return landmarker;
 }
 
@@ -289,6 +325,11 @@ function track(now: number) {
   lastVideoTime = video.currentTime;
   const result = landmarker.detectForVideo(video, now);
   const found = applyResult(result);
+  if (poseLandmarker && arms && poseFrame++ % 2 === 0) {
+    const pose = poseLandmarker.detectForVideo(video, now + 0.5);
+    poseRuns++;
+    arms.setPose(pose.worldLandmarks?.[0], pose.landmarks?.[0], now);
+  }
   trackBadge.textContent = found ? 'Face found' : 'No face';
   trackBadge.classList.toggle('ok', found);
 }
@@ -339,8 +380,9 @@ function animate() {
     setBone('chest', breathe + s.pitch * 0.08, s.yaw * 0.12, s.roll * 0.1);
     setBone('spine', -breathe * 0.5, s.yaw * 0.06, s.x * 0.06 + s.roll * 0.05);
     setBone('hips', 0, 0, 0);
-    for (const b of ['leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand'])
-      setBone(b, 0, 0, b.startsWith('left') ? Math.sin(t * 1.6) * 0.015 : -Math.sin(t * 1.6) * 0.015);
+    if (fakePose) arms?.setPose(fakePose.world, fakePose.image, now);
+    arms?.update(dt, now);
+    dresser?.update(t);
 
     const em = vrm.expressionManager;
     if (em) {
@@ -403,8 +445,9 @@ async function loadFile(file: File) {
   if (objectUrl) URL.revokeObjectURL(objectUrl);
   objectUrl = URL.createObjectURL(file);
   try {
-    await loadVRM(objectUrl, file.name.replace(/\.vrm$/i, ''));
+    await loadVRM(objectUrl, file.name.replace(/\.vrm$/i, ''), true);
     resetBtn.hidden = false;
+    renderPanel();
     showToast(`Loaded ${file.name}. It stays on your device.`);
   } catch (err) {
     showToast(`Could not load that model: ${(err as Error).message}`);
@@ -417,8 +460,9 @@ $<HTMLInputElement>('fileInput').addEventListener('change', (e) => {
   (e.target as HTMLInputElement).value = '';
 });
 resetBtn.addEventListener('click', async () => {
-  await loadVRM(DEFAULT_MODEL, DEFAULT_LABEL);
   resetBtn.hidden = true;
+  loadedUrl = '';
+  await applyConfig(config);
 });
 
 const drop = $('drop');
@@ -434,16 +478,102 @@ window.addEventListener('drop', (e) => {
   if (f) loadFile(f);
 });
 
+// ---------- Customizer ----------
+function loadConfig(): Config {
+  try {
+    const c = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') as Config | null;
+    if (c && CHARACTERS.some((x) => x.id === c.character)) return c;
+  } catch { /* ignore */ }
+  const d = CHARACTERS[0];
+  return { character: d.id, ...d.defaults };
+}
+let config: Config = loadConfig();
+let applyToken = 0;
+const saveConfig = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* private mode */ } };
+
+async function applyConfig(cfg: Config) {
+  const token = ++applyToken;
+  const ch = charById(cfg.character);
+  const url = BASE_URLS[ch.base];
+  if (isCustomModel || loadedUrl !== url || !dresser) await loadVRM(url, ch.label);
+  if (token !== applyToken || !dresser) return;
+  modelName.textContent = ch.label;
+  const color = HAIR_COLORS.find((c) => c.id === cfg.hairColor) ?? HAIR_COLORS[0];
+  dresser.setHairColor(color.hex);
+  await dresser.setHair(cfg.hair);
+  if (token !== applyToken) return;
+  dresser.setHairColor(color.hex);
+  dresser.setSkin(ch.skin);
+  dresser.setOutfit(OUTFITS.find((o) => o.id === cfg.outfit) ?? OUTFITS[0]);
+  dresser.setParts(ch.parts, ch.partColor);
+  renderPanel();
+  setStatus(cameraOn ? 'Tracking' : 'Ready');
+}
+
+const panel = $('panel');
+const customizeBtn = $<HTMLButtonElement>('customizeBtn');
+customizeBtn.addEventListener('click', () => {
+  panel.hidden = !panel.hidden;
+  customizeBtn.classList.toggle('on', !panel.hidden);
+});
+$('panelClose').addEventListener('click', () => { panel.hidden = true; customizeBtn.classList.remove('on'); });
+
+function option(group: HTMLElement, label: string, active: boolean, onClick: () => void, extra?: (b: HTMLButtonElement) => void) {
+  const b = document.createElement('button');
+  b.className = 'opt' + (active ? ' on' : '');
+  b.textContent = label;
+  b.addEventListener('click', onClick);
+  extra?.(b);
+  group.appendChild(b);
+}
+
+function renderPanel() {
+  const chars = $('optCharacters'), hairs = $('optHair'), colors = $('optHairColor'), outfits = $('optOutfit');
+  for (const el of [chars, hairs, colors, outfits]) el.replaceChildren();
+  for (const c of CHARACTERS)
+    option(chars, `${c.emoji} ${c.label}`, !isCustomModel && config.character === c.id, () => {
+      config = { character: c.id, ...c.defaults };
+      choose();
+    });
+  for (const h of HAIRSTYLES) option(hairs, h.label, config.hair === h.id, () => { config.hair = h.id; choose(); });
+  for (const c of HAIR_COLORS)
+    option(colors, c.label, config.hairColor === c.id, () => { config.hairColor = c.id; choose(); }, (b) => {
+      b.classList.add('swatch');
+      b.style.setProperty('--sw', c.hex);
+    });
+  for (const o of OUTFITS) option(outfits, o.label, config.outfit === o.id, () => { config.outfit = o.id; choose(); });
+  $('customNote').hidden = !isCustomModel;
+}
+
+function choose() {
+  saveConfig();
+  renderPanel();
+  resetBtn.hidden = true;
+  applyConfig(config).catch((err) => showToast(`Could not apply that look: ${(err as Error).message}`));
+}
+
 // Debug hooks for automated checks.
 (window as unknown as { __vtuber: unknown }).__vtuber = {
   get loaded() { return !!vrm; },
   get frames() { return frames; },
   get tracking() { return cameraOn; },
   get lastFaceAt() { return lastFaceAt; },
+  get poseRuns() { return poseRuns; },
+  get armsTracked() { return arms?.anyTracked ?? false; },
+  get hair() { return dresser?.hairStyle ?? null; },
+  apply: (c: Partial<Config>) => {
+    const ch = c.character ? charById(c.character) : charById(config.character);
+    config = { character: ch.id, ...ch.defaults, ...c };
+    renderPanel();
+    return applyConfig(config);
+  },
+  characters: CHARACTERS.map((c) => c.id),
+  setFakePose: (p: typeof fakePose) => { fakePose = p; },
   state,
 };
 
-loadVRM(DEFAULT_MODEL, DEFAULT_LABEL)
+renderPanel();
+applyConfig(config)
   .then(() => (startBtn.disabled = false))
   .catch((err) => {
     setStatus('Avatar failed to load');

@@ -3,3 +3,4 @@ dist
 public/mediapipe/wasm
 tools/*.vrm
 .vercel
+tools/cache
